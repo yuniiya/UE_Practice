@@ -4,3 +4,4 @@
 /Build
 /Plugins
 *.sln
+*_BuiltData.uasset
