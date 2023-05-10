@@ -2,8 +2,10 @@
 
 
 #include "ABSection.h"
+#include "ABPlayerController.h"
 #include "ABCharacter.h"
 #include "ABItemBox.h"
+#include "ABGameMode.h"
 
 // Sets default values
 AABSection::AABSection()
@@ -204,7 +206,32 @@ void AABSection::OnGateTriggerBeginOverlap(UPrimitiveComponent* OverlappedCompon
 
 void AABSection::OnNPCSpawn()
 {
-	GetWorld()->SpawnActor<AABCharacter>(GetActorLocation() + FVector::UpVector * 88.f, FRotator::ZeroRotator);
+	GetWorld()->GetTimerManager().ClearTimer(SpawnNPCTimerHandle);
+	auto KeyNPC = GetWorld()->SpawnActor<AABCharacter>(GetActorLocation() + FVector::UpVector * 88.f, FRotator::ZeroRotator);
+	if (nullptr != KeyNPC)
+	{
+		// 맵에 생성된 NPC가 제거될 경우, OnKeyNPCDestroyed() 함수 실행
+		KeyNPC->OnDestroyed.AddDynamic(this, &AABSection::OnKeyNPCDestroyed);
+	}
+}
+
+void AABSection::OnKeyNPCDestroyed(AActor* DestroyedActor)
+{
+	auto ABCharacter = Cast<AABCharacter>(DestroyedActor);
+	ABCHECK(nullptr != ABCharacter);
+
+	// LastHitBy : 마지막으로 데미지를 입힌 컨트롤러의 기록을 저장해둔 속성
+	// 제거된 NPC에게 마지막으로 데미지를 입힌 컨트롤러 가져오기
+	auto ABPlayerController = Cast<AABPlayerController>(ABCharacter->LastHitBy);
+	ABCHECK(nullptr != ABPlayerController);
+
+	// GetAuthGameMode() : 게임 실행 중, 게임 모드의 포인터를 가져오는 함수
+	auto ABGameMode = Cast<AABGameMode>(GetWorld()->GetAuthGameMode());
+	ABCHECK(nullptr != ABGameMode);
+	ABGameMode->AddScore(ABPlayerController);
+
+	// NPC가 죽으면 섹션 액터의 스테이트 체인지 -> 이후 게임 모드에게 스코어 올리라는 명령 + 컨트롤러의 정보를 넘겨 해당 플레이어 스테이트의 스코어++
+	SetState(ESectionState::COMPLETE);
 }
 
 // Called every frame

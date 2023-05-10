@@ -19,11 +19,11 @@ UABAnimInstance::UABAnimInstance()
 // 게임 엔진은 틱 마다 입력 시스템 -> 게임 로직 -> 애니메이션 시스템 순으로 로직을 실행
 void UABAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
-	// 폰의 속도 정보를 가져온 후, 이를 CurrentPawnSpeed에 업데이트해 폰의 속도에 따라 다른 애니메이션을 재생
 	Super::NativeUpdateAnimation(DeltaSeconds);
 	
+	// 폰의 속도 정보를 가져온 후, 이를 CurrentPawnSpeed에 업데이트해 폰의 속도에 따라 다른 애니메이션을 재생
+	// TryGetPawnOwner() : 폰 객체 유효성 검사
 	auto Pawn = TryGetPawnOwner();
-	// 폰 객체 유효성 검사
 	if (false == ::IsValid(Pawn))
 	{
 		return;
@@ -33,7 +33,7 @@ void UABAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	{
 		CurrentPawnSpeed = Pawn->GetVelocity().Size();
 		auto Character = Cast<ACharacter>(Pawn);
-		if (Character)
+		if (nullptr != Character)
 		{
 			// 폰이 현재 점프 중인지 정보를 애님 인스턴스의 멤버 변수로 보관
 			IsInAir = Character->GetMovementComponent()->IsFalling();

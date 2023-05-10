@@ -15,6 +15,7 @@ void UABCharacterWidget::BindCharacterStat(UABCharacterStatComponent* NewCharact
 }
 
 // 엑터의 BeginPlay() 와 비슷한 용도.
+// AddToViewport() 함수가 외부에서 호출될 때 UI 위젯이 초기화되면서 호출되는 함수
 void UABCharacterWidget::NativeConstruct()
 {
 	Super::NativeConstruct();

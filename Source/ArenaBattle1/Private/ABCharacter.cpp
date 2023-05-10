@@ -12,6 +12,10 @@
 #include "ABCharacterSetting.h"
 #include "ABGameInstance.h"
 #include "ABPlayerController.h"
+#include "ABPlayerState.h"
+#include "ABHUDWidget.h"
+#include "ABGameMode.h"
+#include "VisualLogger/VisualLogger.h"
 
 // Sets default values
 AABCharacter::AABCharacter()
@@ -100,10 +104,32 @@ void AABCharacter::SetCharacterState(ECharacterState NewState)
 		break;
 	case ECharacterState::LOADING:
 	{
-		// 입력 비활성화
 		if (true == bIsPlayer)
 		{
+			// 입력 비활성화
 			DisableInput(ABPlayerController);
+
+			// HUD 위젯과 캐릭터 스탯 컴포넌트를 연결
+			ABPlayerController->GetHUDWidget()->BindCharacterStat(CharacterStat);
+
+			// 플레이어 컨트롤러가 캐릭터에 빙의할 때, 캐릭터의 PlayerState 속성에 플레이어 스테이트의 포인터를 저장함.
+			// 따라서 캐릭터의 PlayerState를 통해 정보를 가져올 수 있음.
+			auto ABPlayerState = Cast<AABPlayerState>(GetPlayerState());
+			ABCHECK(nullptr != ABPlayerState);
+			CharacterStat->SetNewLevel(ABPlayerState->GetCharacterLevel());
+		}
+		else
+		{
+			// 현재 게임 스코어가 높을수록 높은 레벨의 NPC 생성
+			auto ABGameMode = Cast<AABGameMode>(GetWorld()->GetAuthGameMode());
+			ABCHECK(nullptr != ABGameMode);
+			// CeilToInt() : 소수점 올림
+			int32 TargetLevel = FMath::CeilToInt(((float)ABGameMode->GetScore() * 0.8f));
+
+			// Clamp(): 같이 범위 안에 있는지 검사하고, 참이라면 그 값을 반환
+			int32 FinalLevel = FMath::Clamp<int32>(TargetLevel, 1, 20);
+			ABLOG(Warning, TEXT("New NPC Level : %d"), FinalLevel);
+			CharacterStat->SetNewLevel(FinalLevel);
 		}
 
 		SetActorHiddenInGame(true);
@@ -167,7 +193,7 @@ void AABCharacter::SetCharacterState(ECharacterState NewState)
 		{
 			if (true == bIsPlayer)
 			{
-				ABPlayerController->RestartLevel();
+				ABPlayerController->ShowResultUI();
 			}
 			else
 			{
@@ -185,6 +211,25 @@ void AABCharacter::SetCharacterState(ECharacterState NewState)
 ECharacterState AABCharacter::GetCharacterState() const
 {
 	return CurrentState;
+}
+
+int32 AABCharacter::GetExp() const
+{
+	return CharacterStat->GetDropExp();
+}
+
+float AABCharacter::GetFinalAttackRange() const
+{
+	// 현재 무기에 따라 공격 범위를 다르게 설정
+	return (nullptr != CurrentWeapon) ? CurrentWeapon->GetAttackRange() : AttackRange;
+}
+
+float AABCharacter::GetFinalAttackDamage() const
+{
+	float AttackDamage = (nullptr != CurrentWeapon) ? (CharacterStat->GetAttack() + CurrentWeapon->GetAttackDamage()) : CharacterStat->GetAttack();
+	float AttackModifier = (nullptr != CurrentWeapon) ? CurrentWeapon->GetAttackModifier() : 1.f;
+
+	return AttackDamage * AttackModifier;
 }
 
 // Called when the game starts or when spawned
@@ -208,13 +253,15 @@ void AABCharacter::BeginPlay()
 	}
 
 	// GetDefault() : 메모리에 올라간 클래스 기본 객체를 가져오는 함수 
-	// 클래스 기본 객체 : 모듈은 로딩되면서 자신에게 속한 모든 언리얼 오브젝트의 기본값을 지정하고 생성하는데, 이를 클래스 기본객체라고 함.)
+	// 클래스 기본 객체 : 모듈은 로딩되면서 자신에게 속한 모든 언리얼 오브젝트의 기본값을 지정하고 생성하는데, 이를 클래스 기본객체라고 함.
 
 	auto DefaultSetting = GetDefault<UABCharacterSetting>();
 
 	if (true == bIsPlayer)
 	{
-		AssetIndex = 4;
+		auto ABPlayerState = Cast<AABPlayerState>(GetPlayerState());
+		ABCHECK(nullptr != ABPlayerState);
+		AssetIndex = ABPlayerState->GetCharacterIndex();
 	}
 	else
 	{
@@ -248,17 +295,18 @@ void AABCharacter::SetControlMode(EControlMode NewControlMode)
 	{
 	case AABCharacter::EControlMode::GTA:
 	{
-		//SpringArm->TargetArmLength = 450.f;
-		//SpringArm->SetRelativeRotation(FRotator::ZeroRotator);
 		ArmLengthTo = 450.0f;
 		SpringArm->bUsePawnControlRotation = true;
+		// bInherit ~ : 다음 속성이 true 라면 스프링 암이 상위 컴포넌트를 따라 회전.
 		SpringArm->bInheritPitch = true;
 		SpringArm->bInheritRoll = true;
 		SpringArm->bInheritYaw = true;
 		SpringArm->bDoCollisionTest = true;
+		// 언리얼 캐릭터 모델은 기본으로 컨트롤 회전의 Yaw값과 폰의 Yaw값이 연동되어 있음.
+		// bUseControllerRotationYaw은 이를 지정하는 속성. 이 설정이 true라면 마우스를 좌우로 움직이면 캐릭터는 z축으로 회전하지만, 마우스의 상하이동은 폰의 회전에 아무런 영향을 주지 않음. 
 		bUseControllerRotationYaw = false;
 
-		// 캐릭터가 움직이는 방향으로 캐릭터를 회전시켜주는 컴포넌트
+		// bOrientRotationToMovement: 캐릭터가 움직이는 방향으로 캐릭터를 회전시켜주는 속성
 		GetCharacterMovement()->bOrientRotationToMovement = true;
 		GetCharacterMovement()->bUseControllerDesiredRotation = false;
 		GetCharacterMovement()->RotationRate = FRotator(0.0f, 720.0f, 0.0f);	// 회전 속도
@@ -266,8 +314,6 @@ void AABCharacter::SetControlMode(EControlMode NewControlMode)
 		break;
 	case AABCharacter::EControlMode::DIABLO:
 	{
-		//SpringArm->TargetArmLength = 800.f;
-		//SpringArm->SetRelativeRotation(FRotator(-45.0f, 0.0f, 0.0f));
 		ArmLengthTo = 800.0f;
 		ArmRotationTo = FRotator(-45.0f, 0.0f, 0.0f);
 		SpringArm->bUsePawnControlRotation = false;
@@ -277,6 +323,7 @@ void AABCharacter::SetControlMode(EControlMode NewControlMode)
 		SpringArm->bDoCollisionTest = false;
 		bUseControllerRotationYaw = false;
 		GetCharacterMovement()->bOrientRotationToMovement = false;
+		// bOrientRotationToMovement 대신 bUseControllerDesiredRotation 속성을 체크해 캐릭터가 컨트롤러를 따라 부드럽게 회전하도록 함
 		GetCharacterMovement()->bUseControllerDesiredRotation = true;
 		GetCharacterMovement()->RotationRate = FRotator(0.0f, 720.0f, 0.0f);
 
@@ -314,8 +361,8 @@ void AABCharacter::Tick(float DeltaTime)
 	{
 		if (DirectionToMove.SizeSquared() > 0.0f)
 		{
-			// MakeFromX : 하나의 벡터로부터 회전 행렬을 만드는 명령
-			// 하나이 벡터 값과 이에 직교하는 나머지 두 축을 구해 회전 행렬 생성
+			// MakeFromX : 하나의 벡터로부터 회전 행렬을 만드는 명령 (X축 = 시선 방향)
+			// 하나의 벡터 값과 이에 직교하는 나머지 두 축을 구해 회전 행렬 생성
 			GetController()->SetControlRotation(FRotationMatrix::MakeFromX(DirectionToMove).Rotator());
 			AddMovementInput(DirectionToMove);
 
@@ -345,7 +392,7 @@ void AABCharacter::PostInitializeComponents()
 		ABLOG(Warning, TEXT("OnNextAttackCheck"));
 		CanNextCombo = false;
 
-		if (IsComboInputOn)
+		if (true == IsComboInputOn)
 		{
 			AttackStartComboState();
 			ABAnim->JumpToAttackMontageSection(CurrentCombo);
@@ -373,6 +420,17 @@ float AABCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEve
 	ABLOG(Warning, TEXT("Actor : %s took Damage : %f"), *GetName(), FinalDamage);
 
 	CharacterStat->SetDamage(FinalDamage);
+	// 현재 상태가 DEAD + 가해자가 플레이어 컨트롤러 이다
+	if (CurrentState == ECharacterState::DEAD)
+	{
+		if (EventInstigator->IsPlayerController())
+		{
+			auto IntstigatorController = Cast<AABPlayerController>(EventInstigator);
+			ABCHECK(nullptr != IntstigatorController, 0.f);
+			// 죽은 NPC의 정보를 플레이어 컨트롤러를 통해 플레이어 스테이트에 전달
+			IntstigatorController->NPCKill(this);
+		}
+	}
 	return FinalDamage;
 }
 
@@ -414,12 +472,21 @@ void AABCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 
 bool AABCharacter::CanSetWeapon()
 {
-	return nullptr == CurrentWeapon;
+	return true;
 }
 
 void AABCharacter::SetWeapon(AABWeapon* NewWeapon)
 {
-	ABCHECK(nullptr != NewWeapon && nullptr == CurrentWeapon);
+	ABCHECK(nullptr != NewWeapon);
+
+	// 이미 무기가 장착되어 있다면, 캐릭터로부터 무기를 떼어내고 새 무기 장착
+	if (nullptr != CurrentWeapon)
+	{
+		CurrentWeapon->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+		CurrentWeapon->Destroy();
+		CurrentWeapon = nullptr;
+	}
+
 	FName WeaponSocket(TEXT("hand_rSocket"));
 	if (nullptr != NewWeapon)
 	{
@@ -469,13 +536,12 @@ void AABCharacter::LeftRight(float NewAxisValue)
 
 void AABCharacter::LookUp(float NewAxisValue)
 {
-	// 마우스 입력 신호값을 플레이어 컨트롤러의 컨트
-	// 롤 회전 값으로 변환하도록 명령
-	// Y축 회전
+	// AddController ~ Input: 마우스 입력 신호값을 플레이어 컨트롤러의 컨트롤 회전 값으로 변환하도록 명령
 	//AddControllerPitchInput(NewAxisValue);
 	switch (CurrentControlMode)
 	{
 	case AABCharacter::EControlMode::GTA:
+		// Y축 회전
 		AddControllerPitchInput(NewAxisValue);
 		break;
 	case AABCharacter::EControlMode::DIABLO:
@@ -487,16 +553,15 @@ void AABCharacter::LookUp(float NewAxisValue)
 
 void AABCharacter::Turn(float NewAxisValue)
 {
-	// Z축 회전
 	//AddControllerYawInput(NewAxisValue);
 	switch (CurrentControlMode)
 	{
 	case AABCharacter::EControlMode::GTA:
+		// Z축 회전
 		AddControllerYawInput(NewAxisValue);
 		break;
 	case AABCharacter::EControlMode::DIABLO:
 		break;
-	//	나는야 이윤서 언리얼의 제왕 이득우 ㅋ 내 아래지모
 	default:
 		break;
 	}
@@ -507,10 +572,15 @@ void AABCharacter::ViewChange()
 	switch (CurrentControlMode)
 	{
 	case AABCharacter::EControlMode::GTA:
+		// GTA 모드였다면 컨트롤 회전이 스프링 암에 맞춰져 있을 것.
+		// Diablo는 캐릭터의 회전이 컨트롤 회전을 결정하기 때문에 시점 변경 전에 캐릭터의 현재 회전 값을 컨트롤 회전으로 세팅해둬야 함.
+		// 그렇지 않으면 컨트롤 회전 시 캐릭터도 회전하게 됨. 
 		GetController()->SetControlRotation(GetActorRotation());
 		SetControlMode(EControlMode::DIABLO);
 		break;
 	case AABCharacter::EControlMode::DIABLO:
+		// Diablo 모드였다면 컨트롤 회전이 캐릭터 회전에 맞춰져 있을 것.
+		// 따라서 현재 스프링 암의 회전값을 컨트롤 회전으로 세팅해둔 상태에서 시점 변경.
 		GetController()->SetControlRotation(SpringArm->GetRelativeRotation());
 		SetControlMode(EControlMode::GTA);
 		break;
@@ -521,11 +591,11 @@ void AABCharacter::ViewChange()
 
 void AABCharacter::Attack()
 {
-	if (IsAttacking)
+	if (true == IsAttacking)
 	{
 		// IsWithinInclusive: 값이 범위 내에 있는지 체크 (최소 ~ 최대 범위)
 		ABCHECK(FMath::IsWithinInclusive<int32>(CurrentCombo, 1, MaxCombo));
-		if (CanNextCombo)
+		if (true == CanNextCombo)
 		{
 			IsComboInputOn = true;
 		}
@@ -575,6 +645,8 @@ void AABCharacter::AttackEndComboState()
 
 void AABCharacter::AttackCheck()
 {
+	float FinalAttackRange = GetFinalAttackRange();
+
 	// 충돌한 엑터 관련 정보를 구조체로 넘겨줘서 탐색
 	FHitResult HitResult;
 
@@ -585,43 +657,48 @@ void AABCharacter::AttackCheck()
 	FCollisionQueryParams Params(NAME_None, false, this);
 	bool bResult = GetWorld()->SweepSingleByChannel(
 		HitResult,
-		GetActorLocation(),										// 탐색 시작 위치
-		GetActorLocation() + AttackRange,						// 탐색 끝낼 위치
+		GetActorLocation(),														// 탐색 시작 위치
+		GetActorLocation() + GetActorForwardVector() * FinalAttackRange,		// 탐색 끝낼 위치
 		FQuat::Identity,
 		ECollisionChannel::ECC_GameTraceChannel2,
 		FCollisionShape::MakeSphere(AttackRadius),				// 50cm 반지름의 구 생성
 		Params);	
 
-	// 콜리전 디버그 드로릴
+	// 콜리전 디버그 드로잉
 #if ENABLE_DRAW_DEBUG
 
-	FVector TraceVec = GetActorForwardVector() * AttackRange;
+	// 캡슐 콜리전을 시선 방향으로 눕히기 = 캡슐 상단을 향햐는 z벡터가 시선 방향과 일치한다는 것을 의미.
+	FVector TraceVec = GetActorForwardVector() * FinalAttackRange;		// 시선 방향
 	FVector Center = GetActorLocation() + TraceVec * 0.5f;
-	float HalfHeight = AttackRange * 0.5f + AttackRadius;
+	float HalfHeight = FinalAttackRange * 0.5f + AttackRadius;
+	// MakeFromZ(시선 방향) => 시선방향으로 눕히기 위해 필요한 회전 좌표축을 생성
 	FQuat CapsuleRot = FRotationMatrix::MakeFromZ(TraceVec).ToQuat();
 	FColor DrawColor = bResult ? FColor::Red : FColor::Green;
-	float DebugLifeTime = 5.0f;
+	float DebugLifeTime = 4.0f;
 
-	DrawDebugCapsule(GetWorld(),
-		Center,
-		HalfHeight,
-		AttackRadius,
-		CapsuleRot,
-		DrawColor,
-		false,
-		DebugLifeTime);
+	//DrawDebugCapsule(GetWorld(),
+	//	Center,
+	//	HalfHeight,
+	//	AttackRadius,
+	//	CapsuleRot,
+	//	DrawColor,
+	//	false,
+	//	DebugLifeTime);
+
+	//UE_VLOG_LOCATION(this, ArenaBattle1, Verbose, GetActorLocation(), 50.f, FColor::Blue, TEXT("Attack Position"));
+	//UE_VLOG_CAPSULE(this, ArenaBattle1, Verbose, GetActorLocation() = GetActorForwardVector() * AttackRadius, HalfHeight, AttackRadius, CapsuleRot, DrawColor, TEXT("Attack Area"));
 
 #endif
 
-	if (bResult)
+	if (true == bResult)
 	{
 		if (nullptr != HitResult.GetActor())
 		{
 			ABLOG(Warning, TEXT("Hit Actor Name : %s"), *HitResult.GetActor()->GetName());
 
-			// TakeDamage(데미지 세기, 데미지 종류, 공격 가해자, 데미지 전달 도구)
+			// TakeDamage(데미지 세기, 데미지 종류, 공격 가해자, 데미지 전달 도구) : 엑터에게 데미지를 전달하는 함수
 			FDamageEvent DamageEvent;
-			HitResult.GetActor()->TakeDamage(CharacterStat->GetAttack(), DamageEvent, GetController(), this);
+			HitResult.GetActor()->TakeDamage(GetFinalAttackDamage(), DamageEvent, GetController(), this);
 		}
 	}
 }
